@@ -44,7 +44,7 @@ export function inBounds(r: number, c: number) {
 
 // ---------- Горы ----------
 
-// ROWS=10: ИИ — ряды 0,1; горы — ряды 3..6; человек — ряды 8,9; чистые — ряды 2 и 7
+// ROWS=14: ИИ — ряды 0,1; чистая — ряд 2; горы — ряды 3..10; чистая — ряд 11; человек — ряды 12,13
 
 function bfsReachable(mountains: boolean[][]): boolean[][] {
   const visited: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
@@ -67,20 +67,21 @@ function bfsReachable(mountains: boolean[][]): boolean[][] {
 }
 
 function generateMountains(): boolean[][] {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     const m: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
     const freeCells: Cell[] = [];
-    // Горы только в рядах 3..6
-    for (let r = 3; r <= 6; r++)
+    // Горы в рядах 3..10 (8 рядов × 8 столбцов = 64 клетки)
+    for (let r = 3; r <= 10; r++)
       for (let c = 0; c < COLS; c++) freeCells.push({ r, c });
 
-    const count = Math.round(freeCells.length * (0.30 + Math.random() * 0.05));
+    // Плотность 40–45%
+    const count = Math.round(freeCells.length * (0.40 + Math.random() * 0.05));
     const shuffled = [...freeCells].sort(() => Math.random() - 0.5);
     for (let i = 0; i < count; i++) m[shuffled[i].r][shuffled[i].c] = true;
 
     const reach = bfsReachable(m);
-    // Проверка: из ряда 2 достижим ряд 7
-    if ([...Array(COLS)].some((_, c) => reach[7][c])) return m;
+    // Проверка: из ряда 2 достижим ряд 11
+    if ([...Array(COLS)].some((_, c) => reach[11][c])) return m;
   }
   return Array.from({ length: ROWS }, () => Array(COLS).fill(false));
 }
@@ -96,11 +97,11 @@ export function newGame(): GameState {
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Человек (снизу): только 5 артиллерий в случайных позициях ряда 8
+  // Человек (снизу): только 5 артиллерий в случайных позициях ряда 12
   const shuffle1 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
   const artyCols1 = new Set(shuffle1.slice(0, 5));
   for (let c = 0; c < COLS; c++)
-    if (artyCols1.has(c)) units.push(createUnit(1, 'arty', 8, c));
+    if (artyCols1.has(c)) units.push(createUnit(1, 'arty', 12, c));
 
   // ИИ (сверху): только лёгкие танки, два ряда
   for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 0, c));
