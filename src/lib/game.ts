@@ -1,5 +1,5 @@
 export const COLS = 8;
-export const ROWS = 10;
+export const ROWS = 14;
 export const SIZE = COLS; // совместимость
 
 export type Owner = 1 | 2;
