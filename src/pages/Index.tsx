@@ -55,7 +55,7 @@ const Index = () => {
   );
 
   const moveCells = useMemo<Cell[]>(() => {
-    if (phase !== 'first-shot' || movedState || !selectedUnit || selectedUnit.type === 'arty') return [];
+    if (phase !== 'first-shot' || movedState || !selectedUnit) return [];
     const orig = state.units.find(u => u.id === selectedId);
     return orig ? getMoves(state, orig) : [];
   }, [phase, movedState, selectedUnit, selectedId, state]);
@@ -107,10 +107,10 @@ const Index = () => {
         setSelectedId(null); setPhase('second-shot');
         return;
       }
-      if (selectedUnit.type === 'light' && moveSet.has(`${r},${c}`)) {
+      if (moveSet.has(`${r},${c}`)) {
         const newS: GameState = { mountains: state.mountains, units: state.units.map(u => ({ ...u })) };
-        newS.units.find(u => u.id === selectedId)!.r = r;
-        newS.units.find(u => u.id === selectedId)!.c = c;
+        const mover = newS.units.find(u => u.id === selectedId)!;
+        mover.r = r; mover.c = c;
         setMovedState(newS); return;
       }
       if (movedState) { finishTurn(movedState); return; }

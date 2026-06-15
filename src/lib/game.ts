@@ -1,5 +1,5 @@
 export const COLS = 8;
-export const ROWS = 14;
+export const ROWS = 10;
 export const SIZE = COLS; // совместимость
 
 export type Owner = 1 | 2;
@@ -44,6 +44,8 @@ export function inBounds(r: number, c: number) {
 
 // ---------- Горы ----------
 
+// ROWS=10: ИИ — ряды 0,1; горы — ряды 3..6; человек — ряды 8,9; чистые — ряды 2 и 7
+
 function bfsReachable(mountains: boolean[][]): boolean[][] {
   const visited: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
   const queue: Cell[] = [];
@@ -68,7 +70,8 @@ function generateMountains(): boolean[][] {
   for (let attempt = 0; attempt < 100; attempt++) {
     const m: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
     const freeCells: Cell[] = [];
-    for (let r = 3; r <= 10; r++)
+    // Горы только в рядах 3..6
+    for (let r = 3; r <= 6; r++)
       for (let c = 0; c < COLS; c++) freeCells.push({ r, c });
 
     const count = Math.round(freeCells.length * (0.30 + Math.random() * 0.05));
@@ -76,7 +79,8 @@ function generateMountains(): boolean[][] {
     for (let i = 0; i < count; i++) m[shuffled[i].r][shuffled[i].c] = true;
 
     const reach = bfsReachable(m);
-    if ([...Array(COLS)].some((_, c) => reach[11][c])) return m;
+    // Проверка: из ряда 2 достижим ряд 7
+    if ([...Array(COLS)].some((_, c) => reach[7][c])) return m;
   }
   return Array.from({ length: ROWS }, () => Array(COLS).fill(false));
 }
@@ -92,25 +96,23 @@ export function newGame(): GameState {
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Человек (снизу): ряды 12–13
-  // Ряд 13: все 8 клеток — ЛТ
-  for (let c = 0; c < COLS; c++) units.push(createUnit(1, 'light', 13, c));
-  // Ряд 12: 4 случайных позиции — АРТ, остальные — ЛТ
-  const cols12 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
-  const artyCols1 = new Set(cols12.slice(0, 4));
-  for (let c = 0; c < COLS; c++) {
-    units.push(createUnit(1, artyCols1.has(c) ? 'arty' : 'light', 12, c));
-  }
+  // Человек (снизу): ряды 8–9
+  // Ряд 9 (передний): все 8 — ЛТ
+  for (let c = 0; c < COLS; c++) units.push(createUnit(1, 'light', 9, c));
+  // Ряд 8: 4 случайных — АРТ, остальные — ЛТ
+  const shuffle1 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
+  const artyCols1 = new Set(shuffle1.slice(0, 4));
+  for (let c = 0; c < COLS; c++)
+    units.push(createUnit(1, artyCols1.has(c) ? 'arty' : 'light', 8, c));
 
   // ИИ (сверху): ряды 0–1
-  // Ряд 0: все 8 — ЛТ
+  // Ряд 0 (передний): все 8 — ЛТ
   for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 0, c));
   // Ряд 1: 4 случайных — АРТ, остальные — ЛТ
-  const cols1 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
-  const artyCols2 = new Set(cols1.slice(0, 4));
-  for (let c = 0; c < COLS; c++) {
+  const shuffle2 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
+  const artyCols2 = new Set(shuffle2.slice(0, 4));
+  for (let c = 0; c < COLS; c++)
     units.push(createUnit(2, artyCols2.has(c) ? 'arty' : 'light', 1, c));
-  }
 
   return { mountains, units };
 }
