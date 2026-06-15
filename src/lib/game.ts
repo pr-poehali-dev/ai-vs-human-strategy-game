@@ -96,23 +96,15 @@ export function newGame(): GameState {
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Человек (снизу): ряды 8–9
-  // Ряд 9 (передний): все 8 — ЛТ
-  for (let c = 0; c < COLS; c++) units.push(createUnit(1, 'light', 9, c));
-  // Ряд 8: 4 случайных — АРТ, остальные — ЛТ
+  // Человек (снизу): только 5 артиллерий в случайных позициях ряда 8
   const shuffle1 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
-  const artyCols1 = new Set(shuffle1.slice(0, 4));
+  const artyCols1 = new Set(shuffle1.slice(0, 5));
   for (let c = 0; c < COLS; c++)
-    units.push(createUnit(1, artyCols1.has(c) ? 'arty' : 'light', 8, c));
+    if (artyCols1.has(c)) units.push(createUnit(1, 'arty', 8, c));
 
-  // ИИ (сверху): ряды 0–1
-  // Ряд 0 (передний): все 8 — ЛТ
+  // ИИ (сверху): только лёгкие танки, два ряда
   for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 0, c));
-  // Ряд 1: 4 случайных — АРТ, остальные — ЛТ
-  const shuffle2 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
-  const artyCols2 = new Set(shuffle2.slice(0, 4));
-  for (let c = 0; c < COLS; c++)
-    units.push(createUnit(2, artyCols2.has(c) ? 'arty' : 'light', 1, c));
+  for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 1, c));
 
   return { mountains, units };
 }

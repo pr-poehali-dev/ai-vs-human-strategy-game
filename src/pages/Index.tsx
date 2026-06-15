@@ -138,52 +138,81 @@ const Index = () => {
     addShot, finishTurn,
   ]);
 
-  // Ход ИИ
+  // Выполнить один ход ИИ, вернуть новый state и данные выстрела
+  const doOneAIAction = useCallback((prev: GameState): { s: GameState; shotFrom: {r:number;c:number}; shotTo: {r:number;c:number}; actorType: string } => {
+    const s: GameState = { mountains: prev.mountains, units: prev.units.map(u => ({ ...u })) };
+    let shotFrom = { r: -1, c: -1 }, shotTo = { r: -1, c: -1 }, actorType = '';
+    const action = computeAIMove(s);
+    if (!action) return { s, shotFrom, shotTo, actorType };
+    const actor = s.units.find(u => u.id === action.unitId)!;
+    actorType = actor.type;
+    if (action.shootTargetId != null) {
+      const tgt = s.units.find(u => u.id === action.shootTargetId)!;
+      shotFrom = { r: actor.r, c: actor.c }; shotTo = { r: tgt.r, c: tgt.c };
+      applyDamage(s, action.shootTargetId, UNIT_INFO[actor.type].dmg);
+      cleanupDead(s);
+    } else if (action.move) {
+      actor.r = action.move.r; actor.c = action.move.c;
+      const targets = getTargets(s, actor);
+      if (targets.length) {
+        const tgt = targets.reduce((a, b) => b.hp < a.hp ? b : a);
+        shotFrom = { r: actor.r, c: actor.c }; shotTo = { r: tgt.r, c: tgt.c };
+        applyDamage(s, tgt.id, UNIT_INFO[actor.type].dmg); cleanupDead(s);
+      }
+    }
+    return { s, shotFrom, shotTo, actorType };
+  }, []);
+
+  // Ход ИИ — два действия подряд с анимацией между ними
   useEffect(() => {
     if (turn !== 2 || winner) return;
     setAiThinking(true);
-    const t = setTimeout(() => {
-      let shotFrom = { r: -1, c: -1 }, shotTo = { r: -1, c: -1 }, actorType = '';
-      setState(prev => {
-        const s: GameState = { mountains: prev.mountains, units: prev.units.map(u => ({ ...u })) };
-        const action = computeAIMove(s);
-        if (!action) return s;
-        const actor = s.units.find(u => u.id === action.unitId)!;
-        actorType = actor.type;
-        if (action.shootTargetId != null) {
-          const tgt = s.units.find(u => u.id === action.shootTargetId)!;
-          shotFrom = { r: actor.r, c: actor.c }; shotTo = { r: tgt.r, c: tgt.c };
-          applyDamage(s, action.shootTargetId, UNIT_INFO[actor.type].dmg);
-          cleanupDead(s);
-        } else if (action.move) {
-          actor.r = action.move.r; actor.c = action.move.c;
-          const targets = getTargets(s, actor);
-          if (targets.length) {
-            const tgt = targets.reduce((a, b) => b.hp < a.hp ? b : a);
-            shotFrom = { r: actor.r, c: actor.c }; shotTo = { r: tgt.r, c: tgt.c };
-            applyDamage(s, tgt.id, UNIT_INFO[actor.type].dmg); cleanupDead(s);
-          }
-        }
-        return s;
-      });
-      if (shotTo.r >= 0)
-        addShot(shotFrom.r, shotFrom.c, shotTo.r, shotTo.c, actorType === 'arty' ? AI_ARTY_COLOR : AI_COLOR);
+
+    // Первый ход ИИ
+    const t1 = setTimeout(() => {
+      let result1: ReturnType<typeof doOneAIAction>;
+      setState(prev => { result1 = doOneAIAction(prev); return result1!.s; });
+
       setTimeout(() => {
-        setState(s => { const w = checkWinner(s); if (w) setWinner(w); else setTurn(1); return s; });
-        setAiThinking(false);
-      }, 1400);
+        const { shotFrom: f1, shotTo: t1pos, actorType: at1 } = result1!;
+        if (t1pos.r >= 0) addShot(f1.r, f1.c, t1pos.r, t1pos.c, at1 === 'arty' ? AI_ARTY_COLOR : AI_COLOR);
+
+        // Проверяем победу после первого хода
+        setState(s => {
+          if (checkWinner(s)) { setWinner(checkWinner(s)!); setAiThinking(false); return s; }
+          return s;
+        });
+
+        // Второй ход ИИ через 1500ms (после анимации первого)
+        const t2 = setTimeout(() => {
+          let result2: ReturnType<typeof doOneAIAction>;
+          setState(prev => { result2 = doOneAIAction(prev); return result2!.s; });
+
+          setTimeout(() => {
+            const { shotFrom: f2, shotTo: t2pos, actorType: at2 } = result2!;
+            if (t2pos.r >= 0) addShot(f2.r, f2.c, t2pos.r, t2pos.c, at2 === 'arty' ? AI_ARTY_COLOR : AI_COLOR);
+
+            // Конец хода ИИ
+            setTimeout(() => {
+              setState(s => { const w = checkWinner(s); if (w) setWinner(w); else setTurn(1); return s; });
+              setAiThinking(false);
+            }, 1400);
+          }, 100);
+        }, 1600);
+
+        return () => clearTimeout(t2);
+      }, 100);
     }, 300);
-    return () => clearTimeout(t);
-  }, [turn, winner, addShot]);
+
+    return () => clearTimeout(t1);
+  }, [turn, winner, addShot, doOneAIAction]);
 
   const hint = useMemo(() => {
-    if (turn === 2 || aiThinking) return 'ИИ ходит…';
-    if (phase === 'select') return 'Выберите юнит';
+    if (turn === 2 || aiThinking) return 'ИИ делает два хода…';
+    if (phase === 'select') return 'Выберите артиллерию';
     if (phase === 'first-shot') return movedState ? 'Стреляйте или кликните поле' : 'Двигайтесь или стреляйте';
     if (phase === 'second-shot') {
-      if (!selectedUnit) return firstShooterType === 'arty'
-        ? 'Выберите артиллерию для 2-го залпа или кликните поле'
-        : 'Выберите артиллерию для поддержки или кликните поле';
+      if (!selectedUnit) return 'Выберите артиллерию для 2-го залпа или кликните поле';
       return 'Выберите цель для артиллерии';
     }
     return '';
