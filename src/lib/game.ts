@@ -1,4 +1,4 @@
-export const SIZE = 11;
+export const SIZE = 9;
 
 export type Owner = 1 | 2; // 1 = человек (снизу), 2 = ИИ (сверху)
 export type UnitType = 'light' | 'heavy' | 'arty';
@@ -25,9 +25,9 @@ export interface GameState {
 export const MAX_HP = 100;
 
 export const UNIT_INFO: Record<UnitType, { dmg: number; label: string; icon: string; name: string }> = {
-  light: { dmg: 50, label: 'ЛТ', icon: '🛡️', name: 'Лёгкий танк' },
-  heavy: { dmg: 100, label: 'ТТ', icon: '⚙️', name: 'Тяжёлый танк' },
-  arty: { dmg: 25, label: 'АРТ', icon: '💥', name: 'Артиллерия' },
+  light: { dmg: 50, label: 'ЛТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/8d8f6982-6718-40f7-966b-840be3a8e9d4.jpg', name: 'Лёгкий танк' },
+  heavy: { dmg: 100, label: 'ТТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/f9c80523-4acd-4f9b-8022-c71cec89061b.jpg', name: 'Тяжёлый танк' },
+  arty: { dmg: 25, label: 'АРТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/e47ec09b-76bf-4316-b8c9-554824f91c86.jpg', name: 'Артиллерия' },
 };
 
 let nextId = 1;
@@ -62,8 +62,8 @@ function bfsReachable(mountains: boolean[][], start: Cell): boolean[][] {
 function generateMountains(): boolean[][] {
   for (let attempt = 0; attempt < 50; attempt++) {
     const m = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
-    // запрещённые ряды: 0,1,2,3,7,8,9,10 — свободные ряды только 4,5,6
-    const allowedRows = [4, 5, 6];
+    // запрещённые ряды: 0,1 (ИИ), 2 (полоса), 6 (полоса), 7,8 (человек). Свободны для гор: 3,4,5
+    const allowedRows = [3, 4, 5];
     const freeCells: Cell[] = [];
     for (const r of allowedRows) {
       for (let c = 0; c < SIZE; c++) freeCells.push({ r, c });
@@ -74,21 +74,15 @@ function generateMountains(): boolean[][] {
     for (let i = 0; i < count; i++) {
       m[shuffled[i].r][shuffled[i].c] = true;
     }
-    // Проверка: из центра достижимы обе стартовые зоны
-    const reach = bfsReachable(m, { r: 5, c: 5 });
-    let ok = true;
-    for (let c = 0; c < SIZE; c++) {
-      if (!reach[3][c] && !reach[7][c]) { /* допускаем частичную */ }
-    }
-    // Гарантия: хотя бы один проход из ряда 3 в ряд 7
+    // Проверка: из центра достижимы обе чистые полосы (ряд 2 сверху и ряд 6 снизу)
+    const reach = bfsReachable(m, { r: 4, c: 4 });
     let topConnected = false;
     let botConnected = false;
     for (let c = 0; c < SIZE; c++) {
-      if (reach[3][c]) topConnected = true;
-      if (reach[7][c]) botConnected = true;
+      if (reach[2][c]) topConnected = true;
+      if (reach[6][c]) botConnected = true;
     }
-    ok = topConnected && botConnected;
-    if (ok) return m;
+    if (topConnected && botConnected) return m;
   }
   // fallback — без гор
   return Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
@@ -103,22 +97,22 @@ export function newGame(): GameState {
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Игрок 1 (человек, снизу): ряд 10 — все ЛТ
-  for (let c = 0; c < SIZE; c++) units.push(createUnit(1, 'light', 10, c));
-  // ряд 9: края — ТТ, 4,5,6 — АРТ
-  units.push(createUnit(1, 'heavy', 9, 0));
-  units.push(createUnit(1, 'heavy', 9, 10));
-  units.push(createUnit(1, 'arty', 9, 4));
-  units.push(createUnit(1, 'arty', 9, 5));
-  units.push(createUnit(1, 'arty', 9, 6));
+  // Игрок 1 (человек, снизу): ряд 8 — все ЛТ
+  for (let c = 0; c < SIZE; c++) units.push(createUnit(1, 'light', 8, c));
+  // ряд 7: края — ТТ, центр (3,4,5) — АРТ
+  units.push(createUnit(1, 'heavy', 7, 0));
+  units.push(createUnit(1, 'heavy', 7, SIZE - 1));
+  units.push(createUnit(1, 'arty', 7, 3));
+  units.push(createUnit(1, 'arty', 7, 4));
+  units.push(createUnit(1, 'arty', 7, 5));
 
   // Игрок 2 (ИИ, сверху): ряд 0 — все ЛТ
   for (let c = 0; c < SIZE; c++) units.push(createUnit(2, 'light', 0, c));
   units.push(createUnit(2, 'heavy', 1, 0));
-  units.push(createUnit(2, 'heavy', 1, 10));
+  units.push(createUnit(2, 'heavy', 1, SIZE - 1));
+  units.push(createUnit(2, 'arty', 1, 3));
   units.push(createUnit(2, 'arty', 1, 4));
   units.push(createUnit(2, 'arty', 1, 5));
-  units.push(createUnit(2, 'arty', 1, 6));
 
   return { mountains, units };
 }
