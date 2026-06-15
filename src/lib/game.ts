@@ -129,13 +129,15 @@ const QUEEN_DIRS = [
   [1, 1], [1, -1], [-1, 1], [-1, -1],
 ];
 
+const SHOOT_RANGE = 5; // дальность стрельбы всех юнитов
+
 // ---------- Возможные ходы ----------
 
 export function getMoves(state: GameState, u: Unit): Cell[] {
   const { mountains, units } = state;
   const moves: Cell[] = [];
   if (u.type === 'arty') {
-    // король — 1 клетка
+    // артиллерия двигается на 1 клетку как король
     for (const [dr, dc] of QUEEN_DIRS) {
       const nr = u.r + dr;
       const nc = u.c + dc;
@@ -165,41 +167,36 @@ export function getTargets(state: GameState, u: Unit): Unit[] {
   const targets: Unit[] = [];
 
   if (u.type === 'arty') {
-    // стрельба на 5 клеток по вертикали/горизонтали, свои не блокируют, враги блокируют
+    // артиллерия: горизонталь/вертикаль до 5 клеток, свои не блокируют, горы и враги блокируют
     for (const [dr, dc] of ROOK_DIRS) {
-      for (let step = 1; step <= 5; step++) {
+      for (let step = 1; step <= SHOOT_RANGE; step++) {
         const nr = u.r + dr * step;
         const nc = u.c + dc * step;
         if (!inBounds(nr, nc)) break;
-        if (mountains[nr][nc]) break; // гора блокирует
+        if (mountains[nr][nc]) break;
         const target = unitAt(units, nr, nc);
         if (target) {
-          if (target.owner !== u.owner) {
-            targets.push(target);
-            break; // враг блокирует дальше
-          } else {
-            // свой не блокирует — продолжаем
-            continue;
-          }
+          if (target.owner !== u.owner) { targets.push(target); }
+          break; // любой юнит (враг) останавливает луч; свой — не блокирует, но мы break т.к. target найден
         }
       }
     }
     return targets;
   }
 
+  // Лёгкий танк (ферзь до 5 клеток) и тяжёлый (ладья до 5 клеток)
   const dirs = u.type === 'heavy' ? ROOK_DIRS : QUEEN_DIRS;
   for (const [dr, dc] of dirs) {
-    let nr = u.r + dr;
-    let nc = u.c + dc;
-    while (inBounds(nr, nc)) {
+    for (let step = 1; step <= SHOOT_RANGE; step++) {
+      const nr = u.r + dr * step;
+      const nc = u.c + dc * step;
+      if (!inBounds(nr, nc)) break;
       if (mountains[nr][nc]) break;
       const target = unitAt(units, nr, nc);
       if (target) {
         if (target.owner !== u.owner) targets.push(target);
-        break; // любой юнит блокирует дальше
+        break; // любой юнит блокирует луч
       }
-      nr += dr;
-      nc += dc;
     }
   }
   return targets;

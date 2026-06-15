@@ -64,16 +64,16 @@ const Index = () => {
   const playerShoot = useCallback((shooter: Unit, target: Unit) => {
     setState((prev) => {
       const s: GameState = { mountains: prev.mountains, units: prev.units.map((u) => ({ ...u })) };
+      // основной выстрел
       applyDamage(s, target.id, UNIT_INFO[shooter.type].dmg);
-      if (shooter.type !== 'arty') {
-        const arties = aliveUnits(s, 1).filter((u) => u.type === 'arty');
-        for (const art of arties) {
-          const canHit = getTargets(s, art).some((t) => t.id === target.id);
-          const stillAlive = s.units.find((u) => u.id === target.id && u.hp > 0);
-          if (canHit && stillAlive) {
-            applyDamage(s, target.id, UNIT_INFO.arty.dmg);
-            break;
-          }
+      // все артиллерии (кроме самого стрелка если это арта) добавляют залп в ту же цель если достают
+      const arties = aliveUnits(s, 1).filter((u) => u.type === 'arty' && u.id !== shooter.id);
+      for (const art of arties) {
+        const stillAlive = s.units.find((u) => u.id === target.id && u.hp > 0);
+        if (!stillAlive) break;
+        const canHit = getTargets(s, art).some((t) => t.id === target.id);
+        if (canHit) {
+          applyDamage(s, target.id, UNIT_INFO.arty.dmg);
         }
       }
       cleanupDead(s);
