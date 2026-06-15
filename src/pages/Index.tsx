@@ -19,13 +19,6 @@ import {
   type Owner,
 } from '@/lib/game';
 
-// Фазы хода игрока:
-// 'select'      — ничего не выбрано, ждём выбора юнита
-// 'tank-move'   — выбран танк, можно двигаться и/или стрелять
-// 'tank-shot'   — танк выстрелил, ждём выбора артиллерии для поддержки
-// 'arty-select' — выбрана артиллерия, показываем её цели
-type Phase = 'select' | 'tank-move' | 'tank-shot' | 'arty-select';
-
 interface ShotAnim {
   id: number;
   fromR: number; fromC: number;
@@ -41,12 +34,9 @@ const Index = () => {
   const [winner, setWinner] = useState<Owner | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [shots, setShots] = useState<ShotAnim[]>([]);
-
-  const [phase, setPhase] = useState<Phase>('select');
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  // State после движения танка (до подтверждения выстрела)
+  // state после того как юнит двинулся (до подтверждения выстрела)
   const [movedState, setMovedState] = useState<GameState | null>(null);
-  const [shotTargetPos, setShotTargetPos] = useState<{ r: number; c: number } | null>(null);
 
   const boardRef = useRef<HTMLDivElement>(null);
 
@@ -56,10 +46,8 @@ const Index = () => {
     setWinner(null);
     setAiThinking(false);
     setShots([]);
-    setPhase('select');
     setSelectedId(null);
     setMovedState(null);
-    setShotTargetPos(null);
   }, []);
 
   const addShot = useCallback((fromR: number, fromC: number, toR: number, toC: number, color: string) => {
@@ -68,7 +56,7 @@ const Index = () => {
     setTimeout(() => setShots((s) => s.filter((x) => x.id !== shot.id)), 1600);
   }, []);
 
-  // Активный state для рендера и расчётов (после движения — movedState)
+  // Для рендера и расчётов: если юнит уже двинулся — используем movedState
   const activeState = movedState ?? state;
 
   const selectedUnit = useMemo(
@@ -76,44 +64,26 @@ const Index = () => {
     [selectedId, activeState],
   );
 
-  // Ходы для выбранного танка (считаем от оригинального state, до движения)
+  // Ходы (только если ещё не двигался)
   const moveCells = useMemo<Cell[]>(() => {
-    if (phase !== 'tank-move' || movedState) return []; // после движения ходы не показываем
-    if (!selectedUnit) return [];
+    if (movedState || !selectedUnit) return [];
     const orig = state.units.find((u) => u.id === selectedId);
     if (!orig) return [];
     return getMoves(state, orig);
-  }, [phase, movedState, selectedUnit, selectedId, state]);
+  }, [movedState, selectedUnit, selectedId, state]);
 
-  // Цели для танка (с текущей позиции — после движения если двигался)
+  // Цели (всегда с текущей позиции — до или после движения)
   const tankTargets = useMemo<Unit[]>(() => {
-    if (phase !== 'tank-move' || !selectedUnit) return [];
+    if (!selectedUnit) return [];
     return getTargets(activeState, selectedUnit);
-  }, [phase, selectedUnit, activeState]);
+  }, [selectedUnit, activeState]);
 
-  // Доступные артиллерии для поддержки (фаза tank-shot)
-  const supportArties = useMemo<Unit[]>(() => {
-    if (phase !== 'tank-shot') return [];
-    return aliveUnits(state, 1).filter((u) => u.type === 'arty');
-  }, [phase, state]);
+  const moveSet      = useMemo(() => new Set(moveCells.map((m) => `${m.r},${m.c}`)),   [moveCells]);
+  const tankTargetSet = useMemo(() => new Set(tankTargets.map((t) => t.id)),            [tankTargets]);
 
-  // Цели для выбранной артиллерии (фаза arty-select)
-  const artyTargets = useMemo<Unit[]>(() => {
-    if (phase !== 'arty-select' || !selectedUnit) return [];
-    return getTargets(state, selectedUnit);
-  }, [phase, selectedUnit, state]);
-
-  const moveSet = useMemo(() => new Set(moveCells.map((m) => `${m.r},${m.c}`)), [moveCells]);
-  const tankTargetSet = useMemo(() => new Set(tankTargets.map((t) => t.id)), [tankTargets]);
-  const supportArtySet = useMemo(() => new Set(supportArties.map((u) => u.id)), [supportArties]);
-  const artyTargetSet = useMemo(() => new Set(artyTargets.map((t) => t.id)), [artyTargets]);
-
-  // Завершение хода игрока
   const finishPlayerTurn = useCallback((finalState: GameState) => {
-    setPhase('select');
     setSelectedId(null);
     setMovedState(null);
-    setShotTargetPos(null);
     setState(finalState);
     const w = checkWinner(finalState);
     if (w) { setWinner(w); return; }
@@ -124,105 +94,73 @@ const Index = () => {
     if (turn !== 1 || winner || aiThinking) return;
     const clickedUnit = unitAt(activeState.units, r, c);
 
-    // === SELECT: выбор любого своего юнита ===
-    if (phase === 'select') {
-      if (clickedUnit?.owner === 1) {
-        setSelectedId(clickedUnit.id);
-        setPhase('tank-move');
-      }
+    if (!selectedUnit) {
+      // Выбор своего юнита
+      if (clickedUnit?.owner === 1) setSelectedId(clickedUnit.id);
       return;
     }
 
-    // === TANK-MOVE: танк выбран ===
-    if (phase === 'tank-move' && selectedUnit) {
-      // Переключение на другой свой юнит
-      if (clickedUnit?.owner === 1 && clickedUnit.id !== selectedId) {
-        setSelectedId(clickedUnit.id);
-        setMovedState(null);
-        return;
-      }
-
-      // Выстрел по цели
-      if (clickedUnit && tankTargetSet.has(clickedUnit.id)) {
-        addShot(selectedUnit.r, selectedUnit.c, clickedUnit.r, clickedUnit.c, '#4ade80');
-        const newS: GameState = {
-          mountains: activeState.mountains,
-          units: activeState.units.map((u) => ({ ...u })),
-        };
-        applyDamage(newS, clickedUnit.id, UNIT_INFO[selectedUnit.type].dmg);
-        cleanupDead(newS);
-        setShotTargetPos({ r: clickedUnit.r, c: clickedUnit.c });
-        setState(newS);
-        setMovedState(null);
-        setSelectedId(null);
-        setPhase('tank-shot');
-        return;
-      }
-
-      // Движение на клетку
-      if (moveSet.has(`${r},${c}`)) {
-        const newS: GameState = {
-          mountains: state.mountains,
-          units: state.units.map((u) => ({ ...u })),
-        };
-        const mover = newS.units.find((u) => u.id === selectedId)!;
-        mover.r = r;
-        mover.c = c;
-        setMovedState(newS);
-        // Остаёмся в tank-move — теперь можно стрелять с новой позиции
-        return;
-      }
-
-      // Клик в пустоту — если двигались, фиксируем движение и заканчиваем ход
-      if (movedState) {
-        finishPlayerTurn(movedState);
-        return;
-      }
-      // Если не двигались — сброс
-      setPhase('select');
-      setSelectedId(null);
+    // Переключение на другой свой юнит
+    if (clickedUnit?.owner === 1 && clickedUnit.id !== selectedId) {
+      setSelectedId(clickedUnit.id);
+      setMovedState(null);
       return;
     }
 
-    // === TANK-SHOT: танк выстрелил, выбираем артиллерию ===
-    if (phase === 'tank-shot') {
-      if (clickedUnit?.owner === 1 && supportArtySet.has(clickedUnit.id)) {
-        setSelectedId(clickedUnit.id);
-        setPhase('arty-select');
-        return;
+    // Выстрел по цели
+    if (clickedUnit && tankTargetSet.has(clickedUnit.id)) {
+      addShot(selectedUnit.r, selectedUnit.c, clickedUnit.r, clickedUnit.c,
+        selectedUnit.type === 'arty' ? '#fbbf24' : '#4ade80');
+
+      const newS: GameState = {
+        mountains: activeState.mountains,
+        units: activeState.units.map((u) => ({ ...u })),
+      };
+      applyDamage(newS, clickedUnit.id, UNIT_INFO[selectedUnit.type].dmg);
+
+      // Автоматическая поддержка артиллерии (если стрелял не арта)
+      if (selectedUnit.type !== 'arty') {
+        const arties = aliveUnits(newS, 1).filter((u) => u.type === 'arty');
+        for (const art of arties) {
+          const stillAlive = newS.units.find((u) => u.id === clickedUnit.id && u.hp > 0);
+          if (!stillAlive) break;
+          if (getTargets(newS, art).some((t) => t.id === clickedUnit.id)) {
+            setTimeout(() => addShot(art.r, art.c, clickedUnit.r, clickedUnit.c, '#fbbf24'), 200);
+            applyDamage(newS, clickedUnit.id, UNIT_INFO.arty.dmg);
+          }
+        }
       }
-      // Любой другой клик — конец хода
-      finishPlayerTurn(state);
+
+      cleanupDead(newS);
+      finishPlayerTurn(newS);
       return;
     }
 
-    // === ARTY-SELECT: артиллерия выбрана ===
-    if (phase === 'arty-select' && selectedUnit) {
-      // Переключение на другую арту
-      if (clickedUnit?.owner === 1 && clickedUnit.type === 'arty' && clickedUnit.id !== selectedId) {
-        setSelectedId(clickedUnit.id);
-        return;
-      }
-      // Выстрел артиллерии
-      if (clickedUnit && artyTargetSet.has(clickedUnit.id)) {
-        addShot(selectedUnit.r, selectedUnit.c, clickedUnit.r, clickedUnit.c, '#fbbf24');
-        const newS: GameState = {
-          mountains: state.mountains,
-          units: state.units.map((u) => ({ ...u })),
-        };
-        applyDamage(newS, clickedUnit.id, UNIT_INFO.arty.dmg);
-        cleanupDead(newS);
-        finishPlayerTurn(newS);
-        return;
-      }
-      // Пропуск — конец хода
-      finishPlayerTurn(state);
+    // Движение на клетку
+    if (moveSet.has(`${r},${c}`)) {
+      const newS: GameState = {
+        mountains: state.mountains,
+        units: state.units.map((u) => ({ ...u })),
+      };
+      const mover = newS.units.find((u) => u.id === selectedId)!;
+      mover.r = r;
+      mover.c = c;
+      setMovedState(newS);
       return;
     }
+
+    // Клик в пустоту — если уже двигались, фиксируем ход
+    if (movedState) {
+      finishPlayerTurn(movedState);
+      return;
+    }
+
+    // Снять выбор
+    setSelectedId(null);
   }, [
-    turn, winner, aiThinking, phase, selectedUnit, selectedId,
+    turn, winner, aiThinking, selectedUnit, selectedId,
     activeState, state, movedState, moveSet, tankTargetSet,
-    artyTargetSet, supportArtySet, addShot, finishPlayerTurn,
+    addShot, finishPlayerTurn,
   ]);
 
   // Ход ИИ
@@ -243,7 +181,7 @@ const Index = () => {
         if (action.shootTargetId != null) {
           const tgt = s.units.find((u) => u.id === action.shootTargetId)!;
           shotFrom = { r: actor.r, c: actor.c };
-          shotTo = { r: tgt.r, c: tgt.c };
+          shotTo   = { r: tgt.r,   c: tgt.c };
           applyDamage(s, action.shootTargetId, UNIT_INFO[actor.type].dmg);
           cleanupDead(s);
         } else if (action.move) {
@@ -253,7 +191,7 @@ const Index = () => {
           if (targets.length) {
             const tgt = targets.reduce((a, b) => (b.hp < a.hp ? b : a));
             shotFrom = { r: actor.r, c: actor.c };
-            shotTo = { r: tgt.r, c: tgt.c };
+            shotTo   = { r: tgt.r,   c: tgt.c };
             applyDamage(s, tgt.id, UNIT_INFO[actor.type].dmg);
             cleanupDead(s);
           }
@@ -262,10 +200,10 @@ const Index = () => {
       });
 
       if (shotTo.r >= 0) {
-        addShot(shotFrom.r, shotFrom.c, shotTo.r, shotTo.c, actorType === 'arty' ? '#fca5a5' : '#f87171');
+        addShot(shotFrom.r, shotFrom.c, shotTo.r, shotTo.c,
+          actorType === 'arty' ? '#fca5a5' : '#f87171');
       }
 
-      // Ждём конца анимации выстрела (луч 0.85s + взрыв 0.35s = ~1.3s)
       setTimeout(() => {
         setState((s) => {
           const w = checkWinner(s);
@@ -279,26 +217,23 @@ const Index = () => {
     return () => clearTimeout(t);
   }, [turn, winner, addShot]);
 
-  const phaseHint = useMemo(() => {
+  const hint = useMemo(() => {
     if (turn === 2 || aiThinking) return 'ИИ ходит…';
-    if (phase === 'select') return 'Выберите юнит';
-    if (phase === 'tank-move') return movedState ? 'Стреляйте или кликните пустое поле' : 'Двигайтесь или стреляйте';
-    if (phase === 'tank-shot') return 'Выберите артиллерию для залпа или кликните пустое поле';
-    if (phase === 'arty-select') return 'Выберите цель для артиллерии';
-    return '';
-  }, [turn, aiThinking, phase, movedState]);
+    if (!selectedUnit) return 'Выберите юнит';
+    if (movedState) return 'Стреляйте или кликните пустое поле';
+    return 'Двигайтесь или стреляйте';
+  }, [turn, aiThinking, selectedUnit, movedState]);
 
   return (
     <div className="w-screen h-screen wood-bg overflow-hidden flex flex-col items-center justify-center gap-2 p-2">
       <div className="font-display uppercase tracking-widest text-xs text-amber-200/80 bg-stone-900/50 px-4 py-1 rounded-full select-none">
-        {phaseHint}
+        {hint}
       </div>
 
       <div
         ref={boardRef}
         className="relative grid rounded-md overflow-hidden border-4 border-stone-950 shadow-2xl"
         style={{
-          // поле 8×14: ячейки квадратные, подгоняем под экран
           width:  `min(${(COLS / ROWS) * 96}vh, 96vw)`,
           height: `min(96vh, ${(ROWS / COLS) * 96}vw)`,
           gridTemplateColumns: `repeat(${COLS}, 1fr)`,
@@ -312,10 +247,7 @@ const Index = () => {
           const isMountain = activeState.mountains[r][c];
           const isMove = moveSet.has(`${r},${c}`);
           const isTankTarget = u ? tankTargetSet.has(u.id) : false;
-          const isArtyTarget = u ? artyTargetSet.has(u.id) : false;
           const isSelected = u?.id === selectedId;
-          const isSupportArty = u ? supportArtySet.has(u.id) : false;
-          const isShotTarget = shotTargetPos && r === shotTargetPos.r && c === shotTargetPos.c;
           const light = (r + c) % 2 === 0;
 
           return (
@@ -325,14 +257,11 @@ const Index = () => {
               className={[
                 'relative flex items-center justify-center border border-stone-900/30',
                 light ? 'wood-light' : 'wood-dark',
-                isSelected ? 'ring-4 ring-inset ring-amber-400 z-10' : '',
-                isTankTarget ? 'ring-4 ring-inset ring-rose-500 z-10' : '',
-                isArtyTarget ? 'ring-4 ring-inset ring-yellow-400 z-10' : '',
-                isSupportArty && phase === 'tank-shot' ? 'ring-4 ring-inset ring-amber-300 z-10' : '',
-                isShotTarget ? 'bg-orange-400/20' : '',
+                isSelected    ? 'ring-4 ring-inset ring-amber-400 z-10' : '',
+                isTankTarget  ? 'ring-4 ring-inset ring-rose-500 z-10'  : '',
               ].filter(Boolean).join(' ')}
             >
-              {isMountain && <span className="text-2xl md:text-4xl select-none">⛰️</span>}
+              {isMountain && <span className="text-2xl md:text-3xl select-none">⛰️</span>}
 
               {isMove && !u && (
                 <span className="absolute w-1/4 h-1/4 rounded-full bg-emerald-400/80 shadow" />
@@ -409,18 +338,14 @@ function ShotOverlay({ shots, cols, rows }: { shots: ShotAnim[]; cols: number; r
         const len = Math.sqrt(dx * dx + dy * dy);
         return (
           <g key={shot.id} filter="url(#glow)">
-            {/* Пульс на стрелке */}
             <circle cx={from.x} cy={from.y} r="0" fill="none" stroke={shot.color} strokeWidth="1" className="shooter-pulse" />
-            {/* Луч снаряда */}
             <line
               x1={from.x} y1={from.y} x2={to.x} y2={to.y}
               stroke={shot.color} strokeWidth="0.9" strokeLinecap="round"
               className="beam-line"
               style={{ '--beam-len': `${len}` } as React.CSSProperties}
             />
-            {/* Вспышка на цели */}
             <circle cx={to.x} cy={to.y} r="0" fill={shot.color} opacity="0.9" className="flash-circle" />
-            {/* Кольцо взрыва */}
             <circle cx={to.x} cy={to.y} r="0" fill="none" stroke={shot.color} strokeWidth="0.6" className="ring-circle" />
           </g>
         );
