@@ -129,32 +129,25 @@ const QUEEN_DIRS = [
   [1, 1], [1, -1], [-1, 1], [-1, -1],
 ];
 
-const SHOOT_RANGE = 5; // дальность стрельбы всех юнитов
+// Дальность движения: ТТ=1, ЛТ=2, АРТ=1
+export const MOVE_RANGE: Record<UnitType, number> = { heavy: 1, light: 2, arty: 1 };
+// Дальность стрельбы: 4 клетки для всех танков, 5 для АРТ
+export const SHOOT_RANGE: Record<UnitType, number> = { heavy: 4, light: 4, arty: 5 };
 
 // ---------- Возможные ходы ----------
 
 export function getMoves(state: GameState, u: Unit): Cell[] {
   const { mountains, units } = state;
   const moves: Cell[] = [];
-  if (u.type === 'arty') {
-    // артиллерия двигается на 1 клетку как король
-    for (const [dr, dc] of QUEEN_DIRS) {
-      const nr = u.r + dr;
-      const nc = u.c + dc;
-      if (inBounds(nr, nc) && !mountains[nr][nc] && !unitAt(units, nr, nc)) {
-        moves.push({ r: nr, c: nc });
-      }
-    }
-    return moves;
-  }
+  const maxSteps = MOVE_RANGE[u.type];
   const dirs = u.type === 'heavy' ? ROOK_DIRS : QUEEN_DIRS;
+
   for (const [dr, dc] of dirs) {
-    let nr = u.r + dr;
-    let nc = u.c + dc;
-    while (inBounds(nr, nc) && !mountains[nr][nc] && !unitAt(units, nr, nc)) {
+    for (let step = 1; step <= maxSteps; step++) {
+      const nr = u.r + dr * step;
+      const nc = u.c + dc * step;
+      if (!inBounds(nr, nc) || mountains[nr][nc] || unitAt(units, nr, nc)) break;
       moves.push({ r: nr, c: nc });
-      nr += dr;
-      nc += dc;
     }
   }
   return moves;
@@ -165,37 +158,36 @@ export function getMoves(state: GameState, u: Unit): Cell[] {
 export function getTargets(state: GameState, u: Unit): Unit[] {
   const { mountains, units } = state;
   const targets: Unit[] = [];
+  const range = SHOOT_RANGE[u.type];
 
   if (u.type === 'arty') {
-    // артиллерия: горизонталь/вертикаль до 5 клеток, свои не блокируют, горы и враги блокируют
+    // артиллерия: горизонталь/вертикаль, свои не блокируют
     for (const [dr, dc] of ROOK_DIRS) {
-      for (let step = 1; step <= SHOOT_RANGE; step++) {
+      for (let step = 1; step <= range; step++) {
         const nr = u.r + dr * step;
         const nc = u.c + dc * step;
-        if (!inBounds(nr, nc)) break;
-        if (mountains[nr][nc]) break;
+        if (!inBounds(nr, nc) || mountains[nr][nc]) break;
         const target = unitAt(units, nr, nc);
         if (target) {
-          if (target.owner !== u.owner) { targets.push(target); }
-          break; // любой юнит (враг) останавливает луч; свой — не блокирует, но мы break т.к. target найден
+          if (target.owner !== u.owner) targets.push(target);
+          break;
         }
       }
     }
     return targets;
   }
 
-  // Лёгкий танк (ферзь до 5 клеток) и тяжёлый (ладья до 5 клеток)
+  // ЛТ — все 8 направлений, ТТ — 4 прямых
   const dirs = u.type === 'heavy' ? ROOK_DIRS : QUEEN_DIRS;
   for (const [dr, dc] of dirs) {
-    for (let step = 1; step <= SHOOT_RANGE; step++) {
+    for (let step = 1; step <= range; step++) {
       const nr = u.r + dr * step;
       const nc = u.c + dc * step;
-      if (!inBounds(nr, nc)) break;
-      if (mountains[nr][nc]) break;
+      if (!inBounds(nr, nc) || mountains[nr][nc]) break;
       const target = unitAt(units, nr, nc);
       if (target) {
         if (target.owner !== u.owner) targets.push(target);
-        break; // любой юнит блокирует луч
+        break;
       }
     }
   }
