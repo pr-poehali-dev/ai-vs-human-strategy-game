@@ -28,7 +28,7 @@ export const MAX_HP = 100;
 
 export const UNIT_INFO: Record<UnitType, { dmg: number; label: string; icon: string; name: string }> = {
   light: { dmg: 50, label: 'ЛТ',  icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/8d8f6982-6718-40f7-966b-840be3a8e9d4.jpg', name: 'Лёгкий танк' },
-  arty:  { dmg: 50, label: 'АРТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/e47ec0b-76bf-4316-b8c9-554824f91c86.jpg', name: 'Артиллерия' },
+  arty:  { dmg: 50, label: 'АРТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/e47ec09b-76bf-4316-b8c9-554824f91c86.jpg', name: 'Артиллерия' },
 };
 
 // Движение: ЛТ — 2 клетки ферзём, АРТ — 1 клетка

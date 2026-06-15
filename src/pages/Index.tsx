@@ -232,8 +232,11 @@ const Index = () => {
                   <img
                     src={UNIT_INFO[u.type].icon} alt={UNIT_INFO[u.type].name}
                     draggable={false}
-                    className="w-[78%] h-[78%] object-contain select-none pointer-events-none"
-                    style={{ filter: u.owner === 2 ? 'sepia(1) saturate(4) hue-rotate(310deg) brightness(0.9)' : 'none' }}
+                    className="w-[85%] h-[85%] object-contain select-none pointer-events-none"
+                    style={{
+                      mixBlendMode: 'multiply',
+                      filter: u.owner === 2 ? 'sepia(1) saturate(4) hue-rotate(310deg) brightness(0.9)' : 'none',
+                    }}
                   />
                   <span className={`absolute top-0.5 left-0.5 w-2 h-2 rounded-full border border-black/40 ${u.owner === 1 ? 'bg-emerald-400' : 'bg-rose-500'}`} />
                   <span className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
