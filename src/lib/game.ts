@@ -31,7 +31,7 @@ export const MAX_HP = 100;
 export const UNIT_INFO: Record<UnitType, { dmg: number; label: string; icon: string; name: string }> = {
   light: { dmg: 50,  label: 'ЛТ',  icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/8d8f6982-6718-40f7-966b-840be3a8e9d4.jpg', name: 'Лёгкий танк' },
   heavy: { dmg: 100, label: 'ТТ',  icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/f9c80523-4acd-4f9b-8022-c71cec89061b.jpg', name: 'Тяжёлый танк' },
-  arty:  { dmg: 25,  label: 'АРТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/e47ec09b-76bf-4316-b8c9-554824f91c86.jpg', name: 'Артиллерия' },
+  arty:  { dmg: 50,  label: 'АРТ', icon: 'https://cdn.poehali.dev/projects/1a799503-e7c0-418c-a1a7-bb3c7dce8684/files/e47ec09b-76bf-4316-b8c9-554824f91c86.jpg', name: 'Артиллерия' },
 };
 
 // Дальность движения
@@ -110,23 +110,19 @@ export function newGame(): GameState {
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Человек снизу: ряд 13 — 8 ЛТ, ряд 12 — края ТТ, центр (2,3,4,5) — АРТ
-  for (let c = 0; c < COLS; c++) units.push(createUnit(1, 'light', 13, c));
-  units.push(createUnit(1, 'heavy', 12, 0));
-  units.push(createUnit(1, 'heavy', 12, COLS - 1));
-  units.push(createUnit(1, 'arty', 12, 2));
-  units.push(createUnit(1, 'arty', 12, 3));
-  units.push(createUnit(1, 'arty', 12, 4));
-  units.push(createUnit(1, 'arty', 12, 5));
+  // Как в шахматах (8 столбцов):
+  // Ряд пешек = ЛТ
+  // Ряд фигур: ладья(0)=АРТ, конь(1)=ТТ, слон(2)=ТТ, ферзь(3)=ТТ, король(4)=ТТ, слон(5)=ТТ, конь(6)=ТТ, ладья(7)=АРТ
+  const backRow1: UnitType[] = ['arty','heavy','heavy','heavy','heavy','heavy','heavy','arty'];
 
-  // ИИ сверху: ряд 0 — 8 ЛТ, ряд 1 — края ТТ, центр АРТ
-  for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 0, c));
-  units.push(createUnit(2, 'heavy', 1, 0));
-  units.push(createUnit(2, 'heavy', 1, COLS - 1));
-  units.push(createUnit(2, 'arty', 1, 2));
-  units.push(createUnit(2, 'arty', 1, 3));
-  units.push(createUnit(2, 'arty', 1, 4));
-  units.push(createUnit(2, 'arty', 1, 5));
+  // Человек снизу: ряд 13 — пешки (ЛТ), ряд 12 — фигуры
+  for (let c = 0; c < COLS; c++) units.push(createUnit(1, 'light', 13, c));
+  for (let c = 0; c < COLS; c++) units.push(createUnit(1, backRow1[c], 12, c));
+
+  // ИИ сверху: ряд 0 — фигуры, ряд 1 — пешки (ЛТ)
+  const backRow2: UnitType[] = ['arty','heavy','heavy','heavy','heavy','heavy','heavy','arty'];
+  for (let c = 0; c < COLS; c++) units.push(createUnit(2, backRow2[c], 0, c));
+  for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 1, c));
 
   return { mountains, units };
 }
@@ -167,15 +163,17 @@ export function getTargets(state: GameState, u: Unit): Unit[] {
   const range = SHOOT_RANGE[u.type];
 
   if (u.type === 'arty') {
+    // Артиллерия стреляет через горы, только юниты блокируют
     for (const [dr, dc] of ROOK_DIRS) {
       for (let step = 1; step <= range; step++) {
         const nr = u.r + dr * step;
         const nc = u.c + dc * step;
-        if (!inBounds(nr, nc) || mountains[nr][nc]) break;
+        if (!inBounds(nr, nc)) break;
+        // горы НЕ блокируют арту
         const target = unitAt(units, nr, nc);
         if (target) {
           if (target.owner !== u.owner) targets.push(target);
-          break;
+          break; // юнит (свой или враг) блокирует луч
         }
       }
     }
