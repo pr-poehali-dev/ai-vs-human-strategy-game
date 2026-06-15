@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
-  SIZE,
+  COLS,
+  ROWS,
   newGame,
   getMoves,
   getTargets,
@@ -64,7 +65,7 @@ const Index = () => {
   const addShot = useCallback((fromR: number, fromC: number, toR: number, toC: number, color: string) => {
     const shot: ShotAnim = { id: ++animId, fromR, fromC, toR, toC, color };
     setShots((s) => [...s, shot]);
-    setTimeout(() => setShots((s) => s.filter((x) => x.id !== shot.id)), 500);
+    setTimeout(() => setShots((s) => s.filter((x) => x.id !== shot.id)), 1600);
   }, []);
 
   // Активный state для рендера и расчётов (после движения — movedState)
@@ -264,6 +265,7 @@ const Index = () => {
         addShot(shotFrom.r, shotFrom.c, shotTo.r, shotTo.c, actorType === 'arty' ? '#fca5a5' : '#f87171');
       }
 
+      // Ждём конца анимации выстрела (луч 0.85s + взрыв 0.35s = ~1.3s)
       setTimeout(() => {
         setState((s) => {
           const w = checkWinner(s);
@@ -272,8 +274,8 @@ const Index = () => {
           return s;
         });
         setAiThinking(false);
-      }, 400);
-    }, 350);
+      }, 1400);
+    }, 300);
     return () => clearTimeout(t);
   }, [turn, winner, addShot]);
 
@@ -296,15 +298,16 @@ const Index = () => {
         ref={boardRef}
         className="relative grid rounded-md overflow-hidden border-4 border-stone-950 shadow-2xl"
         style={{
-          width: 'min(96vmin, 96vw)',
-          height: 'min(96vmin, 96vh)',
-          gridTemplateColumns: `repeat(${SIZE}, 1fr)`,
-          gridTemplateRows: `repeat(${SIZE}, 1fr)`,
+          // поле 8×14: ячейки квадратные, подгоняем под экран
+          width:  `min(${(COLS / ROWS) * 96}vh, 96vw)`,
+          height: `min(96vh, ${(ROWS / COLS) * 96}vw)`,
+          gridTemplateColumns: `repeat(${COLS}, 1fr)`,
+          gridTemplateRows:    `repeat(${ROWS}, 1fr)`,
         }}
       >
-        {Array.from({ length: SIZE * SIZE }).map((_, idx) => {
-          const r = Math.floor(idx / SIZE);
-          const c = idx % SIZE;
+        {Array.from({ length: ROWS * COLS }).map((_, idx) => {
+          const r = Math.floor(idx / COLS);
+          const c = idx % COLS;
           const u = unitAt(activeState.units, r, c);
           const isMountain = activeState.mountains[r][c];
           const isMove = moveSet.has(`${r},${c}`);
@@ -361,7 +364,7 @@ const Index = () => {
           );
         })}
 
-        <ShotOverlay shots={shots} size={SIZE} />
+        <ShotOverlay shots={shots} cols={COLS} rows={ROWS} />
       </div>
 
       {winner && (
@@ -381,27 +384,44 @@ const Index = () => {
   );
 };
 
-function cellCenter(r: number, c: number, size: number) {
-  const pct = 100 / size;
-  return { x: c * pct + pct / 2, y: r * pct + pct / 2 };
+function cellCenter(r: number, c: number, rows: number, cols: number) {
+  return {
+    x: (c / cols) * 100 + (100 / cols) / 2,
+    y: (r / rows) * 100 + (100 / rows) / 2,
+  };
 }
 
-function ShotOverlay({ shots, size }: { shots: ShotAnim[]; size: number }) {
+function ShotOverlay({ shots, cols, rows }: { shots: ShotAnim[]; cols: number; rows: number }) {
   if (shots.length === 0) return null;
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none z-20" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="0.6" result="blur" />
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
       {shots.map((shot) => {
-        const from = cellCenter(shot.fromR, shot.fromC, size);
-        const to = cellCenter(shot.toR, shot.toC, size);
+        const from = cellCenter(shot.fromR, shot.fromC, rows, cols);
+        const to   = cellCenter(shot.toR,   shot.toC,   rows, cols);
         const dx = to.x - from.x;
         const dy = to.y - from.y;
         const len = Math.sqrt(dx * dx + dy * dy);
         return (
-          <g key={shot.id}>
-            <circle cx={from.x} cy={from.y} r="0" fill="none" stroke={shot.color} strokeWidth="0.8" className="shooter-pulse" />
-            <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={shot.color} strokeWidth="0.6" strokeLinecap="round" className="beam-line" style={{ '--beam-len': `${len}` } as React.CSSProperties} />
-            <circle cx={to.x} cy={to.y} r="0" fill={shot.color} opacity="0.85" className="flash-circle" />
-            <circle cx={to.x} cy={to.y} r="0" fill="none" stroke={shot.color} strokeWidth="0.5" className="ring-circle" />
+          <g key={shot.id} filter="url(#glow)">
+            {/* Пульс на стрелке */}
+            <circle cx={from.x} cy={from.y} r="0" fill="none" stroke={shot.color} strokeWidth="1" className="shooter-pulse" />
+            {/* Луч снаряда */}
+            <line
+              x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+              stroke={shot.color} strokeWidth="0.9" strokeLinecap="round"
+              className="beam-line"
+              style={{ '--beam-len': `${len}` } as React.CSSProperties}
+            />
+            {/* Вспышка на цели */}
+            <circle cx={to.x} cy={to.y} r="0" fill={shot.color} opacity="0.9" className="flash-circle" />
+            {/* Кольцо взрыва */}
+            <circle cx={to.x} cy={to.y} r="0" fill="none" stroke={shot.color} strokeWidth="0.6" className="ring-circle" />
           </g>
         );
       })}
