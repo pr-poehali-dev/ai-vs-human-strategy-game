@@ -145,3 +145,67 @@
       transparent 1px 8px
     );
 }
+
+@keyframes shot-beam {
+  0% {
+    stroke-dashoffset: var(--beam-len);
+    opacity: 1;
+  }
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes shot-flash {
+  0% {
+    r: 0px;
+    opacity: 1;
+  }
+  50% {
+    r: 20px;
+    opacity: 1;
+  }
+  100% {
+    r: 28px;
+    opacity: 0;
+  }
+}
+@keyframes shot-ring {
+  0% {
+    r: 8px;
+    opacity: 0.9;
+  }
+  100% {
+    r: 32px;
+    opacity: 0;
+  }
+}
+@keyframes shooter-pulse {
+  0% {
+    opacity: 0.9;
+    r: 14px;
+  }
+  100% {
+    opacity: 0;
+    r: 26px;
+  }
+}
+.beam-line {
+  stroke-dasharray: var(--beam-len);
+  stroke-dashoffset: var(--beam-len);
+  animation: shot-beam 0.32s ease-out forwards;
+}
+.flash-circle {
+  animation: shot-flash 0.32s ease-out forwards;
+}
+.ring-circle {
+  animation: shot-ring 0.4s ease-out 0.08s forwards;
+  opacity: 0;
+}
+.shooter-pulse {
+  animation: shooter-pulse 0.3s ease-out forwards;
+}

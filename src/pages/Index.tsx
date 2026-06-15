@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   SIZE,
   newGame,
@@ -18,12 +18,23 @@ import {
   type Owner,
 } from '@/lib/game';
 
+interface ShotAnim {
+  id: number;
+  fromR: number; fromC: number;
+  toR: number; toC: number;
+  color: string; // цвет луча
+}
+
+let animId = 0;
+
 const Index = () => {
   const [state, setState] = useState<GameState>(() => newGame());
   const [turn, setTurn] = useState<Owner>(1);
   const [selected, setSelected] = useState<number | null>(null);
   const [winner, setWinner] = useState<Owner | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
+  const [shots, setShots] = useState<ShotAnim[]>([]);
+  const boardRef = useRef<HTMLDivElement>(null);
 
   const reset = useCallback(() => {
     setState(newGame());
@@ -31,42 +42,50 @@ const Index = () => {
     setSelected(null);
     setWinner(null);
     setAiThinking(false);
+    setShots([]);
+  }, []);
+
+  const addShot = useCallback((fromR: number, fromC: number, toR: number, toC: number, color: string) => {
+    const shot: ShotAnim = { id: ++animId, fromR, fromC, toR, toC, color };
+    setShots((s) => [...s, shot]);
+    setTimeout(() => setShots((s) => s.filter((x) => x.id !== shot.id)), 500);
   }, []);
 
   const selectedUnit = useMemo(
     () => (selected != null ? state.units.find((u) => u.id === selected) : undefined),
     [selected, state],
   );
-
   const moveCells = useMemo<Cell[]>(
     () => (selectedUnit ? getMoves(state, selectedUnit) : []),
     [selectedUnit, state],
   );
-
   const targetUnits = useMemo<Unit[]>(
     () => (selectedUnit ? getTargets(state, selectedUnit) : []),
     [selectedUnit, state],
   );
-
   const moveSet = useMemo(() => new Set(moveCells.map((m) => `${m.r},${m.c}`)), [moveCells]);
   const targetSet = useMemo(() => new Set(targetUnits.map((t) => t.id)), [targetUnits]);
 
-  const endTurn = useCallback(() => {
+  const endTurn = useCallback((nextTurn: Owner) => {
     setSelected(null);
     setState((s) => {
       const w = checkWinner(s);
       if (w) { setWinner(w); return s; }
-      setTurn(2);
+      setTurn(nextTurn);
       return s;
     });
   }, []);
 
   const playerShoot = useCallback((shooter: Unit, target: Unit) => {
+    // Анимация основного выстрела
+    const beamColor = shooter.type === 'arty' ? '#fbbf24' : '#4ade80';
+    addShot(shooter.r, shooter.c, target.r, target.c, beamColor);
+
     setState((prev) => {
       const s: GameState = { mountains: prev.mountains, units: prev.units.map((u) => ({ ...u })) };
-      // основной выстрел
       applyDamage(s, target.id, UNIT_INFO[shooter.type].dmg);
-      // все артиллерии (кроме самого стрелка если это арта) добавляют залп в ту же цель если достают
+
+      // Все артиллерии поддерживают залп
       const arties = aliveUnits(s, 1).filter((u) => u.type === 'arty' && u.id !== shooter.id);
       for (const art of arties) {
         const stillAlive = s.units.find((u) => u.id === target.id && u.hp > 0);
@@ -74,13 +93,15 @@ const Index = () => {
         const canHit = getTargets(s, art).some((t) => t.id === target.id);
         if (canHit) {
           applyDamage(s, target.id, UNIT_INFO.arty.dmg);
+          // Анимация поддерживающего залпа с задержкой
+          setTimeout(() => addShot(art.r, art.c, target.r, target.c, '#fbbf24'), 120);
         }
       }
       cleanupDead(s);
       return s;
     });
-    endTurn();
-  }, [endTurn]);
+    setTimeout(() => endTurn(2), 50);
+  }, [addShot, endTurn]);
 
   const playerMove = useCallback((u: Unit, cell: Cell) => {
     setState((prev) => {
@@ -90,7 +111,7 @@ const Index = () => {
       mover.c = cell.c;
       return s;
     });
-    endTurn();
+    endTurn(2);
   }, [endTurn]);
 
   const handleCell = useCallback((r: number, c: number) => {
@@ -107,17 +128,25 @@ const Index = () => {
     }
   }, [turn, winner, aiThinking, state, selectedUnit, selected, targetSet, moveSet, playerShoot, playerMove]);
 
-  // Ход ИИ — автоматически после хода человека
+  // Ход ИИ
   useEffect(() => {
     if (turn !== 2 || winner) return;
     setAiThinking(true);
     const t = setTimeout(() => {
+      let shotFromR = -1, shotFromC = -1, shotToR = -1, shotToC = -1;
+      let actorType: string = '';
+
       setState((prev) => {
         const s: GameState = { mountains: prev.mountains, units: prev.units.map((u) => ({ ...u })) };
         const action = computeAIMove(s);
         if (!action) return s;
         const actor = s.units.find((u) => u.id === action.unitId)!;
+        actorType = actor.type;
+
         if (action.shootTargetId != null) {
+          const tgt = s.units.find((u) => u.id === action.shootTargetId)!;
+          shotFromR = actor.r; shotFromC = actor.c;
+          shotToR = tgt.r; shotToC = tgt.c;
           applyDamage(s, action.shootTargetId, UNIT_INFO[actor.type].dmg);
           cleanupDead(s);
         } else if (action.move) {
@@ -126,28 +155,44 @@ const Index = () => {
           const targets = getTargets(s, actor);
           if (targets.length) {
             const tgt = targets.reduce((a, b) => (b.hp < a.hp ? b : a));
+            shotFromR = actor.r; shotFromC = actor.c;
+            shotToR = tgt.r; shotToC = tgt.c;
             applyDamage(s, tgt.id, UNIT_INFO[actor.type].dmg);
             cleanupDead(s);
           }
         }
         return s;
       });
-      setState((s) => {
-        const w = checkWinner(s);
-        if (w) setWinner(w);
-        else setTurn(1);
-        return s;
-      });
-      setAiThinking(false);
-    }, 450);
+
+      // Анимация выстрела ИИ
+      if (shotToR >= 0) {
+        const color = actorType === 'arty' ? '#f87171' : '#f87171';
+        addShot(shotFromR, shotFromC, shotToR, shotToC, color);
+      }
+
+      setTimeout(() => {
+        setState((s) => {
+          const w = checkWinner(s);
+          if (w) setWinner(w);
+          else setTurn(1);
+          return s;
+        });
+        setAiThinking(false);
+      }, 400);
+    }, 300);
     return () => clearTimeout(t);
-  }, [turn, winner]);
+  }, [turn, winner, addShot]);
 
   return (
     <div className="w-screen h-screen wood-bg overflow-hidden flex items-center justify-center p-2">
       <div
-        className="grid w-full h-full max-w-[100vmin] max-h-[100vmin] rounded-md overflow-hidden border-4 border-stone-950 shadow-2xl"
-        style={{ gridTemplateColumns: `repeat(${SIZE}, 1fr)`, gridTemplateRows: `repeat(${SIZE}, 1fr)`, aspectRatio: '1 / 1' }}
+        ref={boardRef}
+        className="relative grid w-full h-full max-w-[100vmin] max-h-[100vmin] rounded-md overflow-hidden border-4 border-stone-950 shadow-2xl"
+        style={{
+          gridTemplateColumns: `repeat(${SIZE}, 1fr)`,
+          gridTemplateRows: `repeat(${SIZE}, 1fr)`,
+          aspectRatio: '1 / 1',
+        }}
       >
         {Array.from({ length: SIZE * SIZE }).map((_, idx) => {
           const r = Math.floor(idx / SIZE);
@@ -167,11 +212,9 @@ const Index = () => {
                 ${isTarget ? 'ring-4 ring-inset ring-rose-500 z-10' : ''}`}
             >
               {isMountain && <span className="text-2xl md:text-4xl select-none">⛰️</span>}
-
               {isMove && !u && (
                 <span className="absolute w-1/4 h-1/4 rounded-full bg-emerald-400/80 shadow" />
               )}
-
               {u && (
                 <>
                   <img
@@ -201,6 +244,9 @@ const Index = () => {
             </button>
           );
         })}
+
+        {/* SVG оверлей с анимацией выстрелов */}
+        <ShotOverlay shots={shots} size={SIZE} />
       </div>
 
       {winner && (
@@ -222,5 +268,78 @@ const Index = () => {
     </div>
   );
 };
+
+// Координаты центра клетки в % от поля
+function cellCenter(r: number, c: number, size: number) {
+  const pct = 100 / size;
+  return {
+    x: c * pct + pct / 2,
+    y: r * pct + pct / 2,
+  };
+}
+
+function ShotOverlay({ shots, size }: { shots: ShotAnim[]; size: number }) {
+  if (shots.length === 0) return null;
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full pointer-events-none z-20"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+    >
+      {shots.map((shot) => {
+        const from = cellCenter(shot.fromR, shot.fromC, size);
+        const to = cellCenter(shot.toR, shot.toC, size);
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+
+        return (
+          <g key={shot.id}>
+            {/* Пульс на стрелке */}
+            <circle
+              cx={from.x}
+              cy={from.y}
+              r="0"
+              fill="none"
+              stroke={shot.color}
+              strokeWidth="0.8"
+              className="shooter-pulse"
+              style={{ transformOrigin: `${from.x}px ${from.y}px` }}
+            />
+            {/* Луч выстрела */}
+            <line
+              x1={from.x} y1={from.y}
+              x2={to.x} y2={to.y}
+              stroke={shot.color}
+              strokeWidth="0.6"
+              strokeLinecap="round"
+              className="beam-line"
+              style={{ '--beam-len': `${len}` } as React.CSSProperties}
+            />
+            {/* Вспышка на цели */}
+            <circle
+              cx={to.x}
+              cy={to.y}
+              r="0"
+              fill={shot.color}
+              opacity="0.85"
+              className="flash-circle"
+            />
+            {/* Кольцо взрыва */}
+            <circle
+              cx={to.x}
+              cy={to.y}
+              r="0"
+              fill="none"
+              stroke={shot.color}
+              strokeWidth="0.5"
+              className="ring-circle"
+            />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 export default Index;
