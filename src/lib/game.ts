@@ -152,15 +152,18 @@ export function getTargets(state: GameState, u: Unit): Unit[] {
   const range = SHOOT_RANGE[u.type];
 
   if (u.type === 'arty') {
-    // АРТ: ладья до 4 клеток, сквозь горы, блокируется юнитами
+    // АРТ: ладья до 4 клеток, сквозь горы и своих юнитов, блокируется только врагами
     for (const [dr, dc] of ROOK_DIRS) {
       for (let step = 1; step <= range; step++) {
         const nr = u.r + dr * step, nc = u.c + dc * step;
         if (!inBounds(nr, nc)) break;
         const target = unitAt(units, nr, nc);
         if (target) {
-          if (target.owner !== u.owner) targets.push(target);
-          break;
+          if (target.owner !== u.owner) {
+            targets.push(target);
+            break; // враг блокирует дальше
+          }
+          // свой юнит — пропускаем, продолжаем луч
         }
       }
     }
