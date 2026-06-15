@@ -33,8 +33,8 @@ export const UNIT_INFO: Record<UnitType, { dmg: number; label: string; icon: str
 
 // Движение: ЛТ — 2 клетки ферзём, АРТ — 1 клетка
 export const MOVE_RANGE: Record<UnitType, number> = { light: 2, arty: 1 };
-// Стрельба: ЛТ — 2 клетки ферзём, АРТ — 4 клетки ладьёй (через горы)
-export const SHOOT_RANGE: Record<UnitType, number> = { light: 2, arty: 4 };
+// Стрельба: ЛТ — 2 клетки ферзём, АРТ — 6 клеток ферзём (через горы и своих)
+export const SHOOT_RANGE: Record<UnitType, number> = { light: 2, arty: 6 };
 
 let nextId = 1;
 
@@ -144,8 +144,8 @@ export function getTargets(state: GameState, u: Unit): Unit[] {
   const range = SHOOT_RANGE[u.type];
 
   if (u.type === 'arty') {
-    // АРТ: ладья до 4 клеток, сквозь горы и своих юнитов, блокируется только врагами
-    for (const [dr, dc] of ROOK_DIRS) {
+    // АРТ: ферзь до 6 клеток, сквозь горы и своих, блокируется только врагами
+    for (const [dr, dc] of QUEEN_DIRS) {
       for (let step = 1; step <= range; step++) {
         const nr = u.r + dr * step, nc = u.c + dc * step;
         if (!inBounds(nr, nc)) break;
@@ -153,9 +153,8 @@ export function getTargets(state: GameState, u: Unit): Unit[] {
         if (target) {
           if (target.owner !== u.owner) {
             targets.push(target);
-            break; // враг блокирует дальше
           }
-          // свой юнит — пропускаем, продолжаем луч
+          break; // любой юнит останавливает луч (свой тоже, но уже после проверки)
         }
       }
     }
