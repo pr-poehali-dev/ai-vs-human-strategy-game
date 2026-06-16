@@ -44,11 +44,12 @@ export function inBounds(r: number, c: number) {
 
 // ---------- Горы ----------
 
-// ROWS=14: ИИ — ряды 0,1; чистая — ряд 2; горы — ряды 3..10; чистая — ряд 11; человек — ряды 12,13
+// ROWS=14: ИИ занимает ряды 0-1 (горы там не генерируются); игрок ставит арту в рядах 2..13
 
 function bfsReachable(mountains: boolean[][]): boolean[][] {
   const visited: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
   const queue: Cell[] = [];
+  // стартуем BFS из ряда 2 (первый ряд после зоны ИИ)
   for (let c = 0; c < COLS; c++) {
     if (!mountains[2][c]) { visited[2][c] = true; queue.push({ r: 2, c }); }
   }
@@ -67,21 +68,26 @@ function bfsReachable(mountains: boolean[][]): boolean[][] {
 }
 
 function generateMountains(): boolean[][] {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 300; attempt++) {
     const m: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
     const freeCells: Cell[] = [];
-    // Горы в рядах 3..10 (8 рядов × 8 столбцов = 64 клетки)
-    for (let r = 3; r <= 10; r++)
+    // Горы в рядах 2..13 (всё поле кроме рядов ИИ 0-1)
+    for (let r = 2; r < ROWS; r++)
       for (let c = 0; c < COLS; c++) freeCells.push({ r, c });
 
-    // Плотность 40–45%
-    const count = Math.round(freeCells.length * (0.40 + Math.random() * 0.05));
+    // Плотность 35–40%
+    const count = Math.round(freeCells.length * (0.35 + Math.random() * 0.05));
     const shuffled = [...freeCells].sort(() => Math.random() - 0.5);
     for (let i = 0; i < count; i++) m[shuffled[i].r][shuffled[i].c] = true;
 
     const reach = bfsReachable(m);
-    // Проверка: из ряда 2 достижим ряд 11
-    if ([...Array(COLS)].some((_, c) => reach[11][c])) return m;
+    // Нужно минимум 5 свободных клеток в рядах 11-13 для расстановки и проходимость до ряда 2
+    const freePlacement = [];
+    for (let r = 11; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (!m[r][c]) freePlacement.push({ r, c });
+
+    if (freePlacement.length >= 5 && [...Array(COLS)].some((_, c) => reach[11][c])) return m;
   }
   return Array.from({ length: ROWS }, () => Array(COLS).fill(false));
 }
@@ -92,22 +98,29 @@ function createUnit(owner: Owner, type: UnitType, r: number, c: number): Unit {
 
 // ---------- Расстановка ----------
 
+export const PLACEMENT_ROWS_START = 11; // игрок ставит арту начиная с этого ряда
+export const ARTY_TO_PLACE = 5;
+
 export function newGame(): GameState {
   nextId = 1;
   const mountains = generateMountains();
   const units: Unit[] = [];
 
-  // Человек (снизу): только 5 артиллерий в случайных позициях ряда 12
-  const shuffle1 = [...Array(COLS)].map((_, i) => i).sort(() => Math.random() - 0.5);
-  const artyCols1 = new Set(shuffle1.slice(0, 5));
-  for (let c = 0; c < COLS; c++)
-    if (artyCols1.has(c)) units.push(createUnit(1, 'arty', 12, c));
-
-  // ИИ (сверху): только лёгкие танки, два ряда
+  // ИИ (сверху): только лёгкие танки, два ряда (горы там не генерируются)
   for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 0, c));
   for (let c = 0; c < COLS; c++) units.push(createUnit(2, 'light', 1, c));
 
+  // Арта игрока НЕ ставится автоматически — игрок расставляет сам в фазе placement
   return { mountains, units };
+}
+
+export function placeArty(state: GameState, r: number, c: number): GameState {
+  if (state.mountains[r][c]) return state;
+  if (unitAt(state.units, r, c)) return state;
+  if (r < PLACEMENT_ROWS_START) return state;
+  const already = state.units.filter(u => u.owner === 1).length;
+  if (already >= ARTY_TO_PLACE) return state;
+  return { ...state, units: [...state.units, createUnit(1, 'arty', r, c)] };
 }
 
 // ---------- Хелперы ----------

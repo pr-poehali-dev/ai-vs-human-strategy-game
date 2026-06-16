@@ -3,15 +3,11 @@ import {
   COLS, ROWS,
   newGame, getMoves, getTargets, unitAt,
   applyDamage, cleanupDead, checkWinner, computeAIMove, aliveUnits,
-  UNIT_INFO, MAX_HP,
+  UNIT_INFO, MAX_HP, placeArty, PLACEMENT_ROWS_START, ARTY_TO_PLACE,
   type GameState, type Unit, type Cell, type Owner,
 } from '@/lib/game';
 
-// Фазы хода:
-// 'select'      — ничего не выбрано
-// 'first-shot'  — юнит выбран, ждём первый выстрел (или движение ЛТ)
-// 'second-shot' — первый выстрел сделан, ждём выстрел артиллерии
-type Phase = 'select' | 'first-shot' | 'second-shot';
+type Phase = 'placement' | 'select' | 'first-shot' | 'second-shot';
 
 interface ShotAnim {
   id: number; fromR: number; fromC: number; toR: number; toC: number; color: string;
@@ -24,21 +20,19 @@ const AI_COLOR      = '#f87171';
 const AI_ARTY_COLOR = '#fca5a5';
 
 const Index = () => {
-  const [state, setState]         = useState<GameState>(() => newGame());
-  const [turn, setTurn]           = useState<Owner>(1);
-  const [winner, setWinner]       = useState<Owner | null>(null);
+  const [state, setState]           = useState<GameState>(() => newGame());
+  const [turn, setTurn]             = useState<Owner>(1);
+  const [winner, setWinner]         = useState<Owner | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
-  const [shots, setShots]         = useState<ShotAnim[]>([]);
-  const [phase, setPhase]         = useState<Phase>('select');
+  const [shots, setShots]           = useState<ShotAnim[]>([]);
+  const [phase, setPhase]           = useState<Phase>('placement');
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [firstShooterType, setFirstShooterType] = useState<'light' | 'arty' | null>(null);
   const [movedState, setMovedState] = useState<GameState | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
   const reset = useCallback(() => {
     setState(newGame()); setTurn(1); setWinner(null); setAiThinking(false);
-    setShots([]); setPhase('select'); setSelectedId(null);
-    setFirstShooterType(null); setMovedState(null);
+    setShots([]); setPhase('placement'); setSelectedId(null); setMovedState(null);
   }, []);
 
   const addShot = useCallback((fromR: number, fromC: number, toR: number, toC: number, color: string) => {
@@ -61,7 +55,7 @@ const Index = () => {
   }, [phase, movedState, selectedUnit, selectedId, state]);
 
   const currentTargets = useMemo<Unit[]>(() => {
-    if (!selectedUnit || phase === 'select') return [];
+    if (!selectedUnit || phase === 'select' || phase === 'placement') return [];
     return getTargets(activeState, selectedUnit);
   }, [selectedUnit, phase, activeState]);
 
@@ -70,21 +64,58 @@ const Index = () => {
     return aliveUnits(state, 1).filter(u => u.type === 'arty');
   }, [phase, state]);
 
+  const placedCount = useMemo(
+    () => state.units.filter(u => u.owner === 1).length,
+    [state],
+  );
+
+  // Клетки доступные для расстановки (ряды PLACEMENT_ROWS_START..ROWS-1, без гор и юнитов)
+  const placementCells = useMemo<Set<string>>(() => {
+    if (phase !== 'placement') return new Set();
+    const s = new Set<string>();
+    for (let r = PLACEMENT_ROWS_START; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (!state.mountains[r][c] && !unitAt(state.units, r, c))
+          s.add(`${r},${c}`);
+    return s;
+  }, [phase, state]);
+
   const moveSet   = useMemo(() => new Set(moveCells.map(m => `${m.r},${m.c}`)), [moveCells]);
   const targetSet = useMemo(() => new Set(currentTargets.map(t => t.id)),       [currentTargets]);
   const artySet   = useMemo(() => new Set(availableArties.map(u => u.id)),      [availableArties]);
 
   const finishTurn = useCallback((finalState: GameState) => {
-    setPhase('select'); setSelectedId(null);
-    setFirstShooterType(null); setMovedState(null);
+    setPhase('select'); setSelectedId(null); setMovedState(null);
     setState(finalState);
     const w = checkWinner(finalState);
     if (w) { setWinner(w); return; }
     setTurn(2);
   }, []);
 
+  const handleSkipTurn = useCallback(() => {
+    if (turn !== 1 || winner || aiThinking || phase === 'placement') return;
+    finishTurn(state);
+  }, [turn, winner, aiThinking, phase, state, finishTurn]);
+
   const handleCell = useCallback((r: number, c: number) => {
-    if (turn !== 1 || winner || aiThinking) return;
+    if (winner || aiThinking) return;
+
+    // --- Фаза расстановки ---
+    if (phase === 'placement') {
+      if (placedCount >= ARTY_TO_PLACE) return;
+      const newS = placeArty(state, r, c);
+      if (newS === state) return;
+      setState(newS);
+      if (newS.units.filter(u => u.owner === 1).length >= ARTY_TO_PLACE) {
+        // Все арты поставлены — переходим к игре, ход у ИИ первый (или у игрока?)
+        // По заданию: после 5-й — враг начинает ходить
+        setPhase('select');
+        setTurn(2);
+      }
+      return;
+    }
+
+    if (turn !== 1) return;
     const clicked = unitAt(activeState.units, r, c);
 
     if (phase === 'select') {
@@ -103,7 +134,6 @@ const Index = () => {
         applyDamage(newS, clicked.id, UNIT_INFO[selectedUnit.type].dmg);
         cleanupDead(newS);
         setState(newS); setMovedState(null);
-        setFirstShooterType(selectedUnit.type);
         setSelectedId(null); setPhase('second-shot');
         return;
       }
@@ -118,27 +148,23 @@ const Index = () => {
     }
 
     if (phase === 'second-shot') {
-      // Выбрать артиллерию
       if (clicked?.owner === 1 && clicked.type === 'arty' && artySet.has(clicked.id)) {
         setSelectedId(clicked.id); return;
       }
-      // Выстрел артиллерией
       if (selectedUnit?.type === 'arty' && clicked && targetSet.has(clicked.id)) {
         addShot(selectedUnit.r, selectedUnit.c, clicked.r, clicked.c, ARTY_COLOR);
         const newS: GameState = { mountains: state.mountains, units: state.units.map(u => ({ ...u })) };
         applyDamage(newS, clicked.id, UNIT_INFO.arty.dmg);
         cleanupDead(newS); finishTurn(newS); return;
       }
-      // Любой другой клик — конец хода
       finishTurn(state); return;
     }
   }, [
-    turn, winner, aiThinking, phase, selectedUnit, selectedId,
+    winner, aiThinking, phase, selectedUnit, selectedId, placedCount,
     activeState, state, movedState, moveSet, targetSet, artySet,
-    addShot, finishTurn,
+    placementCells, addShot, finishTurn,
   ]);
 
-  // Выполнить один ход ИИ, вернуть новый state и данные выстрела
   const doOneAIAction = useCallback((prev: GameState): { s: GameState; shotFrom: {r:number;c:number}; shotTo: {r:number;c:number}; actorType: string } => {
     const s: GameState = { mountains: prev.mountains, units: prev.units.map(u => ({ ...u })) };
     let shotFrom = { r: -1, c: -1 }, shotTo = { r: -1, c: -1 }, actorType = '';
@@ -163,12 +189,10 @@ const Index = () => {
     return { s, shotFrom, shotTo, actorType };
   }, []);
 
-  // Ход ИИ — два действия подряд с анимацией между ними
   useEffect(() => {
     if (turn !== 2 || winner) return;
     setAiThinking(true);
 
-    // Первый ход ИИ
     const t1 = setTimeout(() => {
       let result1: ReturnType<typeof doOneAIAction>;
       setState(prev => { result1 = doOneAIAction(prev); return result1!.s; });
@@ -177,13 +201,11 @@ const Index = () => {
         const { shotFrom: f1, shotTo: t1pos, actorType: at1 } = result1!;
         if (t1pos.r >= 0) addShot(f1.r, f1.c, t1pos.r, t1pos.c, at1 === 'arty' ? AI_ARTY_COLOR : AI_COLOR);
 
-        // Проверяем победу после первого хода
         setState(s => {
           if (checkWinner(s)) { setWinner(checkWinner(s)!); setAiThinking(false); return s; }
           return s;
         });
 
-        // Второй ход ИИ через 1500ms (после анимации первого)
         const t2 = setTimeout(() => {
           let result2: ReturnType<typeof doOneAIAction>;
           setState(prev => { result2 = doOneAIAction(prev); return result2!.s; });
@@ -192,7 +214,6 @@ const Index = () => {
             const { shotFrom: f2, shotTo: t2pos, actorType: at2 } = result2!;
             if (t2pos.r >= 0) addShot(f2.r, f2.c, t2pos.r, t2pos.c, at2 === 'arty' ? AI_ARTY_COLOR : AI_COLOR);
 
-            // Конец хода ИИ
             setTimeout(() => {
               setState(s => { const w = checkWinner(s); if (w) setWinner(w); else setTurn(1); return s; });
               setAiThinking(false);
@@ -208,6 +229,7 @@ const Index = () => {
   }, [turn, winner, addShot, doOneAIAction]);
 
   const hint = useMemo(() => {
+    if (phase === 'placement') return `Расставьте артиллерию (${placedCount}/${ARTY_TO_PLACE}) — кликайте на нижнюю часть поля`;
     if (turn === 2 || aiThinking) return 'ИИ делает два хода…';
     if (phase === 'select') return 'Выберите артиллерию';
     if (phase === 'first-shot') return movedState ? 'Стреляйте или кликните поле' : 'Двигайтесь или стреляйте';
@@ -216,13 +238,24 @@ const Index = () => {
       return 'Выберите цель для артиллерии';
     }
     return '';
-  }, [turn, aiThinking, phase, selectedUnit, movedState, firstShooterType]);
+  }, [phase, placedCount, turn, aiThinking, selectedUnit, movedState]);
 
   return (
     <div className="w-screen h-screen wood-bg overflow-hidden flex flex-col items-center justify-center gap-2 p-2">
-      <div className="font-display uppercase tracking-widest text-xs text-amber-200/80 bg-stone-900/50 px-4 py-1 rounded-full select-none">
-        {hint}
+      <div className="flex items-center gap-3">
+        <div className="font-display uppercase tracking-widest text-xs text-amber-200/80 bg-stone-900/50 px-4 py-1 rounded-full select-none">
+          {hint}
+        </div>
+        {phase !== 'placement' && turn === 1 && !winner && !aiThinking && (
+          <button
+            onClick={handleSkipTurn}
+            className="font-display uppercase tracking-wider text-xs px-3 py-1 rounded-full bg-stone-700 hover:bg-stone-600 text-amber-200/80 border border-stone-500 transition-colors"
+          >
+            Пропустить ход
+          </button>
+        )}
       </div>
+
       <div
         ref={boardRef}
         className="relative grid rounded-md overflow-hidden border-4 border-stone-950 shadow-2xl"
@@ -236,11 +269,12 @@ const Index = () => {
         {Array.from({ length: ROWS * COLS }).map((_, idx) => {
           const r = Math.floor(idx / COLS), c = idx % COLS;
           const u = unitAt(activeState.units, r, c);
-          const isMountain = activeState.mountains[r][c];
-          const isMove     = moveSet.has(`${r},${c}`);
-          const isTarget   = u ? targetSet.has(u.id) : false;
-          const isSelected = u?.id === selectedId;
-          const isArty     = u ? artySet.has(u.id) : false;
+          const isMountain    = activeState.mountains[r][c];
+          const isMove        = moveSet.has(`${r},${c}`);
+          const isTarget      = u ? targetSet.has(u.id) : false;
+          const isSelected    = u?.id === selectedId;
+          const isArty        = u ? artySet.has(u.id) : false;
+          const isPlacement   = phase === 'placement' && placementCells.has(`${r},${c}`);
           const light = (r + c) % 2 === 0;
           return (
             <button
@@ -249,13 +283,17 @@ const Index = () => {
               className={[
                 'relative flex items-center justify-center border border-stone-900/30',
                 light ? 'wood-light' : 'wood-dark',
-                isSelected ? 'ring-4 ring-inset ring-amber-400 z-10' : '',
-                isTarget   ? 'ring-4 ring-inset ring-rose-500 z-10'  : '',
+                isSelected   ? 'ring-4 ring-inset ring-amber-400 z-10' : '',
+                isTarget     ? 'ring-4 ring-inset ring-rose-500 z-10'  : '',
+                isPlacement  ? 'ring-2 ring-inset ring-emerald-400/60 z-10' : '',
                 isArty && phase === 'second-shot' && !selectedUnit ? 'ring-4 ring-inset ring-yellow-300 z-10' : '',
               ].filter(Boolean).join(' ')}
             >
               {isMountain && <span className="text-xl md:text-3xl select-none">⛰️</span>}
               {isMove && !u && <span className="absolute w-1/4 h-1/4 rounded-full bg-emerald-400/80 shadow" />}
+              {isPlacement && !u && !isMountain && (
+                <span className="absolute w-1/4 h-1/4 rounded-full bg-emerald-400/40 shadow" />
+              )}
               {u && (
                 <>
                   <img
